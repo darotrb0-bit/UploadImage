@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>កម្មវិធីថតរូបសិស្ស</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- face-api.js for face detection -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+    <style>
+        /* Custom styles for the app */
+        body {
+            font-family: 'Kantumruy Pro', sans-serif; /* Using a Khmer font available on Google Fonts */
+            overscroll-behavior: contain;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;700&display=swap');
+
+        /* Circular camera view */
+        #camera-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            aspect-ratio: 1 / 1;
+            margin: auto;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 8px solid #f3f4f6;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        #video-feed {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
+            transform: translate(-50%, -50%);
+        }
+        
+        #face-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Loading Spinner */
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 flex items-center justify-center min-h-screen p-4">
+
+    <div id="app-container" class="w-full max-w-lg mx-auto bg-white rounded-2xl shadow-xl p-6 transition-all duration-300">
+
+        <!-- Initial loading screen -->
+        <div id="loading-screen" class="text-center">
+            <div class="loader mx-auto"></div>
+            <p class="mt-4 text-lg font-semibold">កំពុង​រៀបចំ​កម្មវិធី...</p>
+            <p class="text-sm text-slate-500">សូម​រង់ចាំ​បន្តិច</p>
+        </div>
+
+        <!-- Step 1: Student Selection -->
+        <div id="student-selection-step" class="hidden">
+            <h1 class="text-2xl font-bold text-center mb-2">កំណត់​អត្តសញ្ញាណ​សិស្ស</h1>
+            <p class="text-center text-slate-500 mb-6">សូម​វាយ​បញ្ចូល​ឈ្មោះ ឬ​អត្តលេខ​របស់​សិស្ស</p>
+            
+            <div class="relative">
+                <input type="text" id="student-search" list="student-list" class="w-full px-4 py-3 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 transition" placeholder="វាយ​ឈ្មោះ ឬ​អត្តលេខ...">
+                <datalist id="student-list"></datalist>
+            </div>
+
+            <div id="student-info" class="mt-6 p-4 bg-slate-50 rounded-lg hidden">
+                <h3 class="font-bold text-lg" id="info-name"></h3>
+                <p class="text-slate-600" id="info-id"></p>
+                <p class="text-slate-600" id="info-class"></p>
+            </div>
+            
+            <button id="start-camera-btn" class="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-lg mt-6 hover:bg-blue-600 transition disabled:bg-slate-300" disabled>
+                ចាប់ផ្ដើម​ថតរូប
+            </button>
+        </div>
+
+        <!-- Step 2: Camera & Capture -->
+        <div id="camera-step" class="hidden text-center">
+            <h1 class="text-2xl font-bold mb-4">ថតរូប​ផ្ទៃមុខ</h1>
+            <div id="camera-wrapper">
+                <video id="video-feed" playsinline autoplay muted></video>
+                <canvas id="face-overlay"></canvas>
+            </div>
+            <p id="camera-status" class="mt-4 h-6 text-orange-500 font-semibold">កំពុង​ស្វែងរក​ផ្ទៃមុខ...</p>
+            <div class="flex gap-4 mt-4">
+                 <button id="cancel-camera-btn" class="w-full bg-slate-200 text-slate-800 font-bold py-3 px-4 rounded-lg hover:bg-slate-300 transition">
+                    បោះបង់
+                </button>
+                <button id="capture-btn" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-600 transition disabled:bg-slate-300" disabled>
+                    ថតរូប
+                </button>
+            </div>
+        </div>
+        
+        <!-- Step 3: Preview & Upload -->
+        <div id="preview-step" class="hidden text-center">
+             <h1 class="text-2xl font-bold mb-4">ផ្ទៀងផ្ទាត់​រូបភាព</h1>
+             <canvas id="photo-preview" class="rounded-full border-8 border-slate-200 mx-auto"></canvas>
+             <div class="flex gap-4 mt-6">
+                <button id="retake-btn" class="w-full bg-slate-200 text-slate-800 font-bold py-3 px-4 rounded-lg hover:bg-slate-300 transition">
+                    ថត​ឡើងវិញ
+                </button>
+                <button id="upload-btn" class="w-full bg-purple-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-purple-600 transition flex items-center justify-center gap-2">
+                    <svg id="upload-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="bi bi-upload" viewBox="0 0 16 16">
+                      <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                      <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/>
+                    </svg>
+                    <span id="upload-text">បញ្ជូន​រូបភាព</span>
+                    <div id="upload-spinner" class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin hidden"></div>
+                </button>
+             </div>
+        </div>
+
+        <!-- Step 4: Success Message -->
+        <div id="success-step" class="hidden text-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" fill="currentColor" class="bi bi-check-circle-fill text-green-500 mx-auto" viewBox="0 0 16 16">
+              <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
+            </svg>
+            <h1 class="text-2xl font-bold mt-4">ជោគជ័យ!</h1>
+            <p class="text-slate-600 mt-2">រូបភាព​សិស្ស​ត្រូវ​បាន​រក្សាទុក​ដោយ​ជោគជ័យ។</p>
+            <button id="reset-btn" class="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-lg mt-6 hover:bg-blue-600 transition">
+                ថត​សិស្ស​ម្នាក់​ទៀត
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+    // ==========================================================================================
+    // ការ​កំណត់​ค่า (CONFIGURATION)
+    // ==========================================================================================
+    // 1. សូម​បង្កើត Google Sheets API Key ហើយ​បិទ​ភ្ជាប់​នៅ​ទីនេះ
+    const GOOGLE_API_KEY = 'AIzaSyCoePTq3jGDrtv9RwJWsHx2lkYaCRZdlMc'; // <--- បញ្ចូល API KEY នៅទីនេះ
+
+    // 2. សូម​បង្កើត និង Deploy Google Apps Script រួច​បិទ​ភ្ជាប់ URL មក​ទីនេះ
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxTi_h8wcu6kweyvi22RLSL5ElyE00A9tDpLGHt0cx3ZORQ4ZiS9XxaRHMkF7CfKM4M/exec'; // <--- បញ្ចូល WEB APP URL នៅទីនេះ
+
+    const SHEET_ID = '1eRyPoifzyvB4oBmruNyXcoKMKPRqjk6xDD6-bPNW6pc';
+    const SHEET_NAME = 'DIList';
+    
+    /*
+    ==========================================================================================
+    !!! សេចក្ដី​ណែនាំ​សម្រាប់ GOOGLE APPS SCRIPT !!!
+    ==========================================================================================
+    1. ចូល​ទៅកាន់ script.google.com ហើយ​បង្កើត Project ថ្មី
+    2. ប្តូរ​ឈ្មោះ​ Project (ឧ. Student Photo Uploader)
+    3. Copy កូដ​ខាងក្រោម​នេះ​ទាំងស្រុង ហើយ Paste ចូល​ទៅ​ក្នុង​ឯកសារ Code.gs
+    4. ចុច Deploy -> New deployment
+    5. ចុច​លើ​រូប​ Icon កំណត់​ค่า (ប្រអប់​លេខ) ហើយ​ជ្រើសរើស "Web app"
+    6. ក្នុង​ប្រអប់ "Who has access" សូម​ជ្រើសរើស "Anyone"
+    7. ចុច "Deploy" ហើយ​ធ្វើការ Authorize access (អនុញ្ញាត​ឲ្យ​ Script ដំណើរការ)
+    8. Copy យក "Web app URL" ដែល​បាន​បង្ហាញ ហើយ​បិទ​ភ្ជាប់​នៅ​ក្នុង​ค่า `APPS_SCRIPT_URL` ខាងលើ
+
+    --------- កូដ​សម្រាប់ GOOGLE APPS SCRIPT (COPY ពី​ត្រឹម​នេះ) ---------
+
+    function doPost(e) {
+      try {
+        const data = JSON.parse(e.postData.contents);
+        const imageBase64 = data.imageBase64;
+        const studentId = data.studentId;
+        const studentClass = data.studentClass;
+        
+        const decodedImage = Utilities.base64Decode(imageBase64);
+        const blob = Utilities.newBlob(decodedImage, 'image/jpeg', studentId + '.jpg');
+        
+        const FOLDER_IDS = {
+          'DEE1': '1WrWvC4f8YmdtvZDnxWGT3Xkj01n5K3m4',
+          'DEE2': '18mM6ivvbd9dkToDVXc9hY83BBVcCN93M',
+          'DEE3': '1MEQ3psH7eCDCrN_wDw3VLmdFhAoyK_B1',
+          'PG-A': '1OviiBoHb3jylviBMDksUSYMJRjmlwJdQ',
+          'PG-B': '1nGCIzH004luUWt_1tdiz1_rjgv56_dom'
+        };
+        
+        const folderId = FOLDER_IDS[studentClass];
+        
+        if (!folderId) {
+          throw new Error('Folder ID not found for class: ' + studentClass);
+        }
+        
+        const folder = DriveApp.getFolderById(folderId);
+        const file = folder.createFile(blob);
+        
+        return ContentService
+          .createTextOutput(JSON.stringify({ status: 'success', fileId: file.getId() }))
+          .setMimeType(ContentService.MimeType.JSON);
+          
+      } catch (error) {
+        Logger.log(error.toString());
+        return ContentService
+          .createTextOutput(JSON.stringify({ status: 'error', message: error.toString() }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    --------- (រហូត​ដល់​ត្រឹម​នេះ) ---------
+    */
+
+    // DOM Elements
+    const elements = {
+        loadingScreen: document.getElementById('loading-screen'),
+        studentSelectionStep: document.getElementById('student-selection-step'),
+        cameraStep: document.getElementById('camera-step'),
+        previewStep: document.getElementById('preview-step'),
+        successStep: document.getElementById('success-step'),
+        studentSearch: document.getElementById('student-search'),
+        studentList: document.getElementById('student-list'),
+        studentInfo: document.getElementById('student-info'),
+        infoName: document.getElementById('info-name'),
+        infoId: document.getElementById('info-id'),
+        infoClass: document.getElementById('info-class'),
+        startCameraBtn: document.getElementById('start-camera-btn'),
+        cancelCameraBtn: document.getElementById('cancel-camera-btn'),
+        video: document.getElementById('video-feed'),
+        faceOverlay: document.getElementById('face-overlay'),
+        cameraStatus: document.getElementById('camera-status'),
+        captureBtn: document.getElementById('capture-btn'),
+        previewCanvas: document.getElementById('photo-preview'),
+        retakeBtn: document.getElementById('retake-btn'),
+        uploadBtn: document.getElementById('upload-btn'),
+        uploadText: document.getElementById('upload-text'),
+        uploadSpinner: document.getElementById('upload-spinner'),
+        uploadIcon: document.getElementById('upload-icon'),
+        resetBtn: document.getElementById('reset-btn'),
+    };
+
+    // App State
+    let studentData = [];
+    let selectedStudent = null;
+    let videoStream = null;
+    let faceDetectionInterval = null;
+
+    // Functions
+    function switchView(viewId) {
+        const steps = [
+            elements.loadingScreen, 
+            elements.studentSelectionStep, 
+            elements.cameraStep, 
+            elements.previewStep, 
+            elements.successStep
+        ];
+        steps.forEach(step => {
+            if (step.id === viewId) {
+                step.classList.remove('hidden');
+            } else {
+                step.classList.add('hidden');
+            }
+        });
+    }
+
+    async function loadModels() {
+        try {
+            await faceapi.loadTinyFaceDetectorModel('/models');
+            await faceapi.loadFaceLandmarkModel('/models');
+        } catch (error) {
+             console.error("Error loading face detection models:", error);
+             alert("Could not load face detection models. Please check the console for errors.");
+        }
+    }
+
+    async function fetchStudentData() {
+        if (GOOGLE_API_KEY === 'YOUR_GOOGLE_SHEETS_API_KEY') {
+            alert('សូម​បញ្ចូល Google Sheets API Key ជា​មុន​សិន!');
+            return;
+        }
+        // Fetching multiple ranges at once
+        const ranges = [`${SHEET_NAME}!E9:E`, `${SHEET_NAME}!L9:L`, `${SHEET_NAME}!R9:R`];
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchGet?ranges=${ranges.join('&ranges=')}&key=${GOOGLE_API_KEY}`;
+        
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                 throw new Error(`Error fetching sheet data: ${response.statusText}`);
+            }
+            const data = await response.json();
+            const idData = data.valueRanges[0].values || [];
+            const nameData = data.valueRanges[1].values || [];
+            const classData = data.valueRanges[2].values || [];
+
+            const maxLength = Math.max(idData.length, nameData.length, classData.length);
+
+            studentData = [];
+            for (let i = 0; i < maxLength; i++) {
+                const id = idData[i] ? idData[i][0] : '';
+                const name = nameData[i] ? nameData[i][0] : '';
+                const className = classData[i] ? classData[i][0] : '';
+                if (id && name && className) {
+                    studentData.push({ id, name, class: className });
+                }
+            }
+            
+            populateDatalist();
+        } catch (error) {
+            console.error(error);
+            alert('មាន​បញ្ហា​ក្នុង​ការ​ទាញ​យក​ទិន្នន័យ​សិស្ស។ សូម​ពិនិត្យ API Key និង Sheet ID។');
+        }
+    }
+    
+    function populateDatalist() {
+        elements.studentList.innerHTML = '';
+        studentData.forEach(student => {
+            const option = document.createElement('option');
+            option.value = `${student.name} (${student.id})`;
+            elements.studentList.appendChild(option);
+        });
+    }
+    
+    function handleStudentSearch(e) {
+        const value = e.target.value;
+        const match = studentData.find(s => `${s.name} (${s.id})` === value);
+        
+        if (match) {
+            selectedStudent = match;
+            elements.infoName.textContent = `ឈ្មោះ: ${match.name}`;
+            elements.infoId.textContent = `អត្តលេខ: ${match.id}`;
+            elements.infoClass.textContent = `ថ្នាក់: ${match.class}`;
+            elements.studentInfo.classList.remove('hidden');
+            elements.startCameraBtn.disabled = false;
+        } else {
+            selectedStudent = null;
+            elements.studentInfo.classList.add('hidden');
+            elements.startCameraBtn.disabled = true;
+        }
+    }
+
+    async function startCamera() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            alert('កម្មវិធី​រុករក​របស់​អ្នក​មិន​គាំទ្រ​ការ​ប្រើប្រាស់​កាមេរ៉ា​ទេ');
+            return;
+        }
+        
+        switchView('camera-step');
+        try {
+            const constraints = { video: { facingMode: 'user' } };
+            videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+            elements.video.srcObject = videoStream;
+            elements.video.onloadedmetadata = () => {
+                elements.video.play();
+                setupFaceDetection();
+            };
+        } catch (err) {
+            console.error("Error accessing camera: ", err);
+            alert('មិន​អាច​បើក​កាមេរ៉ា​បាន​ទេ។ សូម​អនុញ្ញាត​ឲ្យ​កម្មវិធី​ប្រើប្រាស់​កាមេរ៉ា។');
+            resetApp();
+        }
+    }
+
+    function stopCamera() {
+        if (videoStream) {
+            videoStream.getTracks().forEach(track => track.stop());
+            videoStream = null;
+        }
+        if (faceDetectionInterval) {
+            clearInterval(faceDetectionInterval);
+            faceDetectionInterval = null;
+        }
+    }
+    
+    function setupFaceDetection() {
+        const canvas = elements.faceOverlay;
+        const displaySize = { width: elements.video.clientWidth, height: elements.video.clientHeight };
+        faceapi.matchDimensions(canvas, displaySize);
+        
+        faceDetectionInterval = setInterval(async () => {
+            const detections = await faceapi.detectAllFaces(elements.video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks();
+            const resizedDetections = faceapi.resizeResults(detections, displaySize);
+            const context = canvas.getContext('2d');
+            context.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (resizedDetections.length === 1) {
+                const box = resizedDetections[0].detection.box;
+                const centerX = box.x + box.width / 2;
+                const centerY = box.y + box.height / 2;
+                const canvasCenterX = canvas.width / 2;
+                const canvasCenterY = canvas.height / 2;
+                
+                // Check if face is centered and big enough
+                const isCentered = Math.abs(centerX - canvasCenterX) < 50 && Math.abs(centerY - canvasCenterY) < 50;
+                const isLargeEnough = box.width > canvas.width * 0.5 && box.height > canvas.height * 0.5;
+
+                if (isCentered && isLargeEnough) {
+                    elements.cameraStatus.textContent = 'ល្អ​ណាស់! សូម​ចុច​ថត';
+                    elements.cameraStatus.className = 'mt-4 h-6 text-green-500 font-semibold';
+                    elements.captureBtn.disabled = false;
+                } else if (!isLargeEnough) {
+                    elements.cameraStatus.textContent = 'សូម​ចូល​មក​ជិត​កាមេរ៉ា​បន្តិច';
+                    elements.cameraStatus.className = 'mt-4 h-6 text-orange-500 font-semibold';
+                    elements.captureBtn.disabled = true;
+                } else {
+                    elements.cameraStatus.textContent = 'សូម​ដាក់​ផ្ទៃមុខ​នៅ​ចំ​កណ្ដាល';
+                    elements.cameraStatus.className = 'mt-4 h-6 text-orange-500 font-semibold';
+                    elements.captureBtn.disabled = true;
+                }
+
+            } else if (resizedDetections.length > 1) {
+                elements.cameraStatus.textContent = 'មាន​ផ្ទៃមុខ​ច្រើន​ពេក';
+                elements.cameraStatus.className = 'mt-4 h-6 text-red-500 font-semibold';
+                elements.captureBtn.disabled = true;
+            } else {
+                elements.cameraStatus.textContent = 'រក​មិន​ឃើញ​ផ្ទៃមុខ';
+                elements.cameraStatus.className = 'mt-4 h-6 text-red-500 font-semibold';
+                elements.captureBtn.disabled = true;
+            }
+
+        }, 300);
+    }
+    
+    function capturePhoto() {
+        stopCamera();
+        
+        const size = Math.min(elements.video.videoWidth, elements.video.videoHeight);
+        const sx = (elements.video.videoWidth - size) / 2;
+        const sy = (elements.video.videoHeight - size) / 2;
+        
+        elements.previewCanvas.width = 300;
+        elements.previewCanvas.height = 300;
+        const ctx = elements.previewCanvas.getContext('2d');
+
+        ctx.beginPath();
+        ctx.arc(150, 150, 150, 0, Math.PI * 2, true);
+        ctx.closePath();
+        ctx.clip();
+        
+        ctx.drawImage(elements.video, sx, sy, size, size, 0, 0, 300, 300);
+        switchView('preview-step');
+    }
+
+    async function uploadPhoto() {
+        if (APPS_SCRIPT_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL') {
+            alert('សូម​បញ្ចូល Google Apps Script URL ជា​មុន​សិន!');
+            return;
+        }
+
+        elements.uploadBtn.disabled = true;
+        elements.uploadText.classList.add('hidden');
+        elements.uploadIcon.classList.add('hidden');
+        elements.uploadSpinner.classList.remove('hidden');
+
+        try {
+            const imageBase64 = elements.previewCanvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+            const payload = {
+                imageBase64: imageBase64,
+                studentId: selectedStudent.id,
+                studentClass: selectedStudent.class
+            };
+
+            const response = await fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                mode: 'cors',
+                headers: {
+                    'Content-Type': 'text/plain;charset=utf-8',
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                switchView('success-step');
+            } else {
+                throw new Error(result.message || 'Unknown error from Apps Script');
+            }
+
+        } catch (error) {
+            console.error('Upload failed:', error);
+            alert(`ការ​បញ្ជូន​រូបភាព​មាន​បញ្ហា: ${error.message}`);
+        } finally {
+            elements.uploadBtn.disabled = false;
+            elements.uploadText.classList.remove('hidden');
+            elements.uploadIcon.classList.remove('hidden');
+            elements.uploadSpinner.classList.add('hidden');
+        }
+    }
+
+    function resetApp() {
+        stopCamera();
+        selectedStudent = null;
+        elements.studentSearch.value = '';
+        elements.studentInfo.classList.add('hidden');
+        elements.startCameraBtn.disabled = true;
+        elements.captureBtn.disabled = true;
+        switchView('student-selection-step');
+    }
+
+    // Event Listeners
+    elements.studentSearch.addEventListener('input', handleStudentSearch);
+    elements.startCameraBtn.addEventListener('click', startCamera);
+    elements.cancelCameraBtn.addEventListener('click', resetApp);
+    elements.captureBtn.addEventListener('click', capturePhoto);
+    elements.retakeBtn.addEventListener('click', startCamera);
+    elements.uploadBtn.addEventListener('click', uploadPhoto);
+    elements.resetBtn.addEventListener('click', resetApp);
+    
+    // Initializer
+    async function initializeApp() {
+        await Promise.all([
+            loadModels(),
+            fetchStudentData()
+        ]);
+        switchView('student-selection-step');
+    }
+    
+    window.onload = initializeApp;
+
+    </script>
+</body>
+</html>
